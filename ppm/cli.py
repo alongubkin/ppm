@@ -6,7 +6,6 @@ import dockerpty
 from docker_client_factory import DockerClientFactory
 
 from package import Package
-from package_serializer import PackageSerializer
 from package_loader import PackageLoader
 
 MOUNT_DIRECTORY = "/usr/src/app"
@@ -27,7 +26,23 @@ def init(name, version, description, entry_point, base_image):
     package = Package(name, version, description, entry_point, base_image)
 
     loader = PackageLoader()
-    loader.save(os.getcwd(), package)
+
+    generator = loader.save(os.getcwd(), package,
+                            should_require_confirmation=True)
+    package_file_path, package_file_contents = generator.next()
+
+    click.echo()
+    click.echo(click.style("About to write to {}:".format(package_file_path),
+                           fg="green", bold=True))
+    click.echo()
+
+    click.echo(package_file_contents)
+    click.echo()
+
+    if click.confirm(click.style("Is this OK?", fg="green"), default=True):
+        generator.next()
+    else:
+        click.echo(click.style("Aborted.", fg="red", bold=True))
 
 @click.command()
 def run():

@@ -26,16 +26,22 @@ class PackageLoader(object):
 
         return package
 
-    def save(self, path, package):
+    def save(self, path, package, should_require_confirmation=False):
         serializer = PackageSerializer()
 
         # Save package info file
         package_file_path = os.path.join(path, PACKAGE_FILE_NAME)
+        package_file_contents = serializer.serialize(package)
+
+        if should_require_confirmation:
+            yield (package_file_path, package_file_contents)
+            yield
+
         with open(package_file_path, "w") as package_file:
-            package_file.write(serializer.serialize(package))
+            package_file.write(package_file_contents)
 
         # Save current image file
         if package.base_image != package.current_image:
             current_image_file_name = os.path.join(path, CURRENT_IMAGE_FILE_NAME)
             with open(current_image_file_name, "w") as current_image_file:
-                current_image_file.write(package.current_image)            
+                current_image_file.write(package.current_image)

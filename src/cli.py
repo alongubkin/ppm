@@ -4,10 +4,12 @@ import click
 import dockerpty
 
 from docker_client_factory import DockerClientFactory
-from package import Package
 
-PACKAGE_FILE_NAME = "ppm-package.json"
-MOUNT_DIRECTORY = "/mnt/app"
+from package import Package
+from package_serializer import PackageSerializer
+from package_loader import PackageLoader
+
+MOUNT_DIRECTORY = "/usr/src/app"
 
 @click.group()
 def cli():
@@ -19,45 +21,24 @@ def cli():
 @click.option("--version", prompt="Version", default="1.0.0")
 @click.option("--description", prompt="Description", default="")
 @click.option("--entry-point", prompt="Entry Point", default="main.py")
-def init(name, version, description, entry_point):
-    package = Package(name, version, description, entry_point)
-    data = package.serialize()
+@click.option("--base-image", prompt="Base Image",
+              default="library/python:3-onbuild")
+def init(name, version, description, entry_point, base_image):
+    package = Package(name, version, description, entry_point, base_image)
 
-    package_file_path = os.path.join(os.getcwd(), PACKAGE_FILE_NAME)
-
-    click.echo()
-    click.echo(click.style("About to write to {}:".format(package_file_path),
-                           fg="green", bold=True))
-    click.echo()
-
-    click.echo(data)
-    click.echo()
-
-    if click.confirm(click.style("Is this OK?", fg="green"), default=True):
-        with open(package_file_path, "w") as package_file:
-            package_file.write(data)
-    else:
-        click.echo(click.style("Aborted.", fg="red", bold=True))
+    loader = PackageLoader()
+    loader.save(os.getcwd(), package)
 
 @click.command()
 def run():
-    # Open package
-    package_file_path = os.path.join(os.getcwd(), PACKAGE_FILE_NAME)
-    with open(package_file_path, "r") as package_file:
-        package = Package.deserialize(package_file.read())
-
-    # Open image id
-    try:
-        with open(".ppm_id", "r") as ppm_id_file:
-            image_id = ppm_id_file.read()
-    except IOError:
-        image_id = "library/python:3-onbuild"
+    loader = PackageLoader()
+    package = loader.load(os.getcwd())
 
     client_factory = DockerClientFactory()
     client = client_factory.get_client()
 
     container = client.create_container(
-        image=image_id,
+        image=package.current_image,
         stdin_open=True,
         tty=True,
         command="python {}".format(package.entry_point),
@@ -74,22 +55,14 @@ def run():
 
 @click.command()
 def install():
-    package_file_path = os.path.join(os.getcwd(), PACKAGE_FILE_NAME)
-    with open(package_file_path, "r") as package_file:
-        package = Package.deserialize(package_file.read())
-
-    # Open image id
-    try:
-        with open(".ppm_id", "r") as ppm_id_file:
-            image_id = ppm_id_file.read()
-    except IOError:
-        image_id = "library/python:3-onbuild"
+    loader = PackageLoader()
+    package = loader.load(os.getcwd())
 
     client_factory = DockerClientFactory()
     client = client_factory.get_client()
 
     container = client.create_container(
-        image=image_id,
+        image=package.current_image,
         stdin_open=True,
         tty=True,
         command="pip install flask",
@@ -104,9 +77,9 @@ def install():
 
     dockerpty.start(client, container)
 
-    image_id = client.commit(container=container.get("Id")).get("Id")
-    with open(".ppm_id", "w") as ppm_id_file:
-        ppm_id_file.write(image_id)
+    # Update package image
+    package.current_image = client.commit(container.get("Id")).get("Id")
+    loader.save(os.getcwd(), package)
 
 cli.add_command(init)
 cli.add_command(run)
